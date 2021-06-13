@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
+//#include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "WeatherController.h"
 #include "UObject/NoExportTypes.h"

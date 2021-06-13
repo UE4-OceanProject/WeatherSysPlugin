@@ -2,16 +2,11 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
-
+//#include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "TimeDateStruct.h"
-//#include "RuntimeMeshActor.h"
-//#include "NavigationSystem.h"
-//#include "Engine/TextureRenderTarget2D.h"
-
 
 #include "WeatherDataTypes.h"
 #include "WeatherController.generated.h"
@@ -19,6 +14,8 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWeatherCondition, EWeatherCondition, NewCondition, FWeatherStateData, WeatherStateData);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWeatherAPICallBack, EWeatherAPICallbackStatus, Response);
+
+
 
 UCLASS()
 class UOpenWeatherAPI : public UObject
@@ -59,8 +56,11 @@ public:
 	{
 		FString URL;
 		FString Lat, Long;
-		Lat = UKismetStringLibrary::Conv_IntToString(Latitude);
-		Long = UKismetStringLibrary::Conv_IntToString(Longitude);
+		//If float to int conversion was intentional use: 
+		//Lat.AppendInt(Latitude);
+		//Long.AppendInt(Longitude);
+		Long = FString::SanitizeFloat(Longitude);
+		Lat = FString::SanitizeFloat(Latitude);
 		switch (QueryType)
 		{
 		case EOpenWeatherAPIQueryType::E_CityLocation: {
@@ -79,27 +79,24 @@ public:
 
 };
 
-
+class UCharacterMovementComponent;
 /* Weather Controller Actor
 * Forward vector of this actor should always face north
 */
-UCLASS()
+UCLASS(BlueprintType)
 class WEATHERSYS_API AWeatherController : public AActor
 {
 	GENERATED_BODY()
 
-		//#TODO Split out snow part of this into separate class
-public:
-	// Sets default values for this actor's properties
-	AWeatherController();
+		/** Default UObject constructor. */
+		AWeatherController(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-	void OnConstruction(const FTransform& Transform) override;
+	//void OnConstruction(const FTransform& Transform) override;
 
-	virtual void PostInitializeComponents() override;
 
 public:
 	// Called every frame
@@ -107,28 +104,26 @@ public:
 
 	virtual void BeginDestroy() override;
 
-
-
 	/* Single point weather state information, either assigned from weatherAPI or user input */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
 		FWeatherStateData WeatherData;
 
 	/*UPROPERTY(BlueprintReadOnly, Category = "Weather System|Procedural gen")
 	URuntimeMeshProviderStatic* StaticProvider;*/
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 		USceneComponent* Root;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-		UArrowComponent* WindDirectionIndicator;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+		UArrowComponent* WindDirectionIndicatorComponent;
 
 	/* #TODO Implement when searching for actors to control the materials of */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 		UBoxComponent* ControlRegion;
 
-	/* Wind Directional Source for controlling speed tree material wind */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-		UChildActorComponent* SpeedTreeWind;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+		UWindDirectionalSourceComponent* SpeedTreeWindComponent;
 
+public:
 
 	/* Array of Dynamic Mat instances of each object detected in the begin search and added to the controlled list */
 	UPROPERTY()

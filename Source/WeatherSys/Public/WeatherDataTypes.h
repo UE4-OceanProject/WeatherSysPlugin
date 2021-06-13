@@ -2,8 +2,7 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
-#include "Kismet/KismetStringLibrary.h"
+//#include "CoreMinimal.h"
 #include "WeatherDataTypes.generated.h"
 
 

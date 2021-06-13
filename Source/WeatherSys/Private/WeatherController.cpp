@@ -2,22 +2,10 @@
 
 
 #include "WeatherController.h"
-#include "Engine/StaticMeshActor.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "DrawDebugHelpers.h"
-
-#include "Engine/WindDirectionalSource.h"
 #include "Components/WindDirectionalSourceComponent.h"
 
-//#include "TrueSkySequenceActor.h"
 #include "VaRest/Public/VaRestSubsystem.h"
 #include "VaRest/Public/VaRestJsonObject.h"
-
-
-#include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetStringLibrary.h"
-
 
 UOpenWeatherAPI::UOpenWeatherAPI()
 {
@@ -32,7 +20,8 @@ UOpenWeatherAPI::UOpenWeatherAPI()
 
 
 // Sets default values
-AWeatherController::AWeatherController()
+AWeatherController::AWeatherController(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
@@ -47,69 +36,61 @@ AWeatherController::AWeatherController()
 	Season = ESeason::E_Summer;
 	bIsNorthernHemisphere = true;
 	RotationOffset = FRotator(0, 90, 0);
+	
+	// We need a scene component to attach to
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	if (Root)
 	{
 		SetRootComponent(Root);
 	}
-
-	WindDirectionIndicator = CreateDefaultSubobject<UArrowComponent>(TEXT("Wind Direction"));
-	if (WindDirectionIndicator)
-	{
-		WindDirectionIndicator->SetupAttachment(GetRootComponent());
-		WeatherData.WindDirection = WindDirectionIndicator->GetForwardVector(); // flows in direction arrows heading in
-	}
+	RootComponent->Mobility = EComponentMobility::Static;
 
 	ControlRegion = CreateDefaultSubobject<UBoxComponent>(TEXT("Region Control Box"));
 	if (ControlRegion)
 	{
-		ControlRegion->SetupAttachment(GetRootComponent());
+		ControlRegion->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
 		ControlRegion->SetCollisionObjectType(ECC_WorldDynamic);
 		//ControlRegion->SetCollisionResponseToAllChannels(ECR_Ignore);
 		ControlRegion->SetCollisionResponseToChannel(ECC_WorldStatic, ECollisionResponse::ECR_Block);
-
+		ControlRegion->Mobility = EComponentMobility::Static;
 	}
 
-	SpeedTreeWind = CreateDefaultSubobject<UChildActorComponent>(TEXT("Speed Tree Wind Source"));
-	if (SpeedTreeWind)
+	SpeedTreeWindComponent = CreateDefaultSubobject<UWindDirectionalSourceComponent>(TEXT("WindDirectionalSourceComponent0"));
+	if (SpeedTreeWindComponent)
 	{
-		SpeedTreeWind->SetupAttachment(GetRootComponent());
-		SpeedTreeWind->SetWorldRotation(UKismetMathLibrary::MakeRotFromX(WeatherData.WindDirection).Quaternion());
+		SpeedTreeWindComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
 
+		WindDirectionIndicatorComponent = CreateDefaultSubobject<UArrowComponent>(TEXT("WindDirectionComponent"));
+		if (WindDirectionIndicatorComponent)
+		{
+			WindDirectionIndicatorComponent->AttachToComponent(SpeedTreeWindComponent, FAttachmentTransformRules::KeepRelativeTransform);
+			WindDirectionIndicatorComponent->SetCollisionObjectType(ECC_WorldDynamic);
+			WindDirectionIndicatorComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECollisionResponse::ECR_Block);
+		}
 	}
 
-	//if(!bUseCustomHeightFog)
-	//{
-	//	/*HeightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("Height fog"));
-	//	if(HeightFog)
-	//	{
-	//		HeightFog->SetupAttachment(GetRootComponent());
-	//	}*/
-	//}
-
 
 }
 
-void AWeatherController::OnConstruction(const FTransform& Transform)
-{
-	FTransform ModRot = FTransform::Identity;
-	ModRot.SetRotation(RotationOffset.Quaternion());
+//void AWeatherController::OnConstruction(const FTransform& Transform)
+//{
+//	FTransform ModRot = FTransform::Identity;
+//	ModRot.SetRotation(RotationOffset.Quaternion());
+//	if (!SpeedTreeWind)
+//	{
+//		//SpeedTreeWind = NewObject<UWindDirectionalSourceComponent>(this);
+//		//SpeedTreeWind->SetupAttachment(GetRootComponent());
+//		//SpeedTreeWind->SetWorldRotation(UKismetMathLibrary::MakeRotFromX(WeatherData.WindDirection).Quaternion());
+//
+//	}
+//	/* Rotation must always face north */
+//	//SetActorRotation(RotationOffset.Quaternion());
+//
+//	if (!IsValid(InternalAPIPtr) && IsValid(WeatherAPI)) InternalAPIPtr = NewObject<UOpenWeatherAPI>(this, WeatherAPI);
+//	UpdateSpeedTreeWind();
+//	Super::OnConstruction(Transform);
+//}
 
-	/* Rotation must always face north */
-	//SetActorRotation(RotationOffset.Quaternion());
-	SpeedTreeWind->SetChildActorClass(AWindDirectionalSource::StaticClass());
-	SpeedTreeWind->CreateChildActor();
-	if (!IsValid(InternalAPIPtr) && WeatherAPI->IsValidLowLevel()) InternalAPIPtr = NewObject<UOpenWeatherAPI>(this, WeatherAPI);
-	UpdateSpeedTreeWind();
-	Super::OnConstruction(Transform);
-}
-
-//Need to duplicate the child actor setup in both construction and initialize components. One allows us to change the wind, 
-//the other allows us to run our packaged game. Weird.
-void AWeatherController::PostInitializeComponents()
-{
-	Super::PostInitializeComponents();
-}
 
 // Called when the game starts or when spawned
 void AWeatherController::BeginPlay()
@@ -305,7 +286,10 @@ void AWeatherController::OnAPIResponse(UVaRestRequestJSON* Request)
 		/*===  Error Responses  === */
 		if (JsonResp->HasField("cod"))
 		{	/* Response code is a string field not number.....why....*/
-			ResponseCode = UKismetStringLibrary::Conv_StringToInt(JsonResp->GetStringField("cod"));
+
+			//note Atoi is unsafe; no way to indicate errors. This is the same as using UKismetStringLibrary,
+			//but without the include/code overhead.
+			ResponseCode = (int32)JsonResp->GetNumberField("cod");
 		}
 		if (ResponseCode != 200) // 200 is their OK response, #TODO Expose as variable/macro for different API's codes
 		{
@@ -355,11 +339,11 @@ void AWeatherController::OnAPIResponse(UVaRestRequestJSON* Request)
 			//ATM Arrows are in DIRECTION of the wind, not the direction its COMING from and going to
 			WeatherData.WindDirectionInDegreesFromNorth = WindDegrees;
 			WeatherData.WindDirection = NewDir;
-			if (WindDirectionIndicator)
-				WindDirectionIndicator->SetWorldRotation(UKismetMathLibrary::MakeRotFromX(NewDir));
-			if (SpeedTreeWind)
+			if (WindDirectionIndicatorComponent)
+				WindDirectionIndicatorComponent->SetWorldRotation(FRotationMatrix::MakeFromX(NewDir).Rotator());
+			if (SpeedTreeWindComponent)
 			{
-				SpeedTreeWind->SetWorldRotation(UKismetMathLibrary::MakeRotFromX(NewDir));
+				SpeedTreeWindComponent->SetWorldRotation(FRotationMatrix::MakeFromX(NewDir).Rotator());
 				UpdateSpeedTreeWind();
 			}
 		}
@@ -434,18 +418,17 @@ void AWeatherController::OnAPIResponse(UVaRestRequestJSON* Request)
 
 void AWeatherController::UpdateSpeedTreeWind()
 {
-	auto test = SpeedTreeWind->GetChildActor();
-	if (AWindDirectionalSource* ST_Wind = Cast<AWindDirectionalSource>(SpeedTreeWind->GetChildActor()))
+	if (IsValid(SpeedTreeWindComponent))
 	{/* set the wind parameters into speed tree from weather data*/
 
 		// Speed tree uses a odd value for its wind speed, reducing the KM/H wind  speed by a factor of 10 seems to give a reasonable speed result on trees
 		//Pretty sure its a 0-1 value. Would need to setup a range converter
-		const float W_Speed = WeatherData.WindSpeed * 0.07f;
-		const float W_Gust = WeatherData.WindGustSpeed * 0.07f;
-		ST_Wind->GetComponent()->SetStrength(W_Speed);
-		ST_Wind->GetComponent()->SetSpeed(W_Speed);
-		ST_Wind->GetComponent()->SetMinimumGustAmount(W_Speed);
-		ST_Wind->GetComponent()->SetMaximumGustAmount(W_Gust);
+		const float W_Speed = WeatherData.WindSpeed * 0.04f;
+		const float W_Gust = WeatherData.WindGustSpeed * 0.04f;
+		SpeedTreeWindComponent->SetStrength(W_Speed);
+		SpeedTreeWindComponent->SetSpeed(W_Speed);
+		SpeedTreeWindComponent->SetMinimumGustAmount(W_Speed);
+		SpeedTreeWindComponent->SetMaximumGustAmount(W_Gust);
 	}
 }
 
@@ -459,12 +442,12 @@ void AWeatherController::ChangeWeatherCondition(const EWeatherCondition NewCondi
 		WeatherData.WindDirection = FVector(1, 0, 0); // dont want a zero vector for direction
 
 	//WeatherData.SunDirection = UKismetMathLibrary::GetForwardVector(ATrueSkySequenceActor::GetSunRotation());
-	const FRotator WindDir = UKismetMathLibrary::MakeRotFromX(WeatherData.WindDirection);
-	if (WindDirectionIndicator)
-		WindDirectionIndicator->SetWorldRotation(WindDir);
-	if (SpeedTreeWind)
+	const FRotator WindDir = FRotationMatrix::MakeFromX(WeatherData.WindDirection).Rotator();
+	if (WindDirectionIndicatorComponent)
+		WindDirectionIndicatorComponent->SetWorldRotation(WindDir);
+	if (SpeedTreeWindComponent)
 	{
-		SpeedTreeWind->SetWorldRotation(WindDir);
+		SpeedTreeWindComponent->SetWorldRotation(WindDir);
 		UpdateSpeedTreeWind();
 	}
 
@@ -476,4 +459,3 @@ void AWeatherController::GetCurrentWeather(EWeatherCondition& CurrentCondition, 
 	CurrentCondition = WeatherCondition;
 	CurrentData = WeatherData;
 }
-
